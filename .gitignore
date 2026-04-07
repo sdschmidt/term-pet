@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+
+# Build
+dist/
+build/
+
+# Virtual environments
+.venv/
+
+# Testing & linting
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Claude Code (keep .claude/ itself)
+*-mcp.json
+.gemini-clipboard
+.cc2cc-session-id
+claude_scratch/
+settings.local.json
+CLAUDE.local.md
+*.local
+*.local.*
+.superpowers/
+
+# tpet runtime
+.tpet/
+.env
+*~
+*.bak
+scripts/ollama_art_report.html

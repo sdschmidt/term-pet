@@ -1,0 +1,133 @@
+[project]
+name = "term-pet"
+dynamic = [
+    "version",
+]
+description = "A terminal pet companion that monitors Claude Code sessions"
+readme = "README.md"
+url = "https://github.com/paulrobello/tpet"
+authors = [
+    { name = "Paul Robello", email = "probello@gmail.com" },
+]
+maintainers = [
+    { name = "Paul Robello", email = "probello@gmail.com" },
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Other Audience",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Terminals",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+keywords = [
+    "terminal",
+    "pet",
+    "claude",
+    "ai",
+    "tui",
+    "ascii",
+    "ollama",
+    "llm",
+]
+requires-python = ">=3.13"
+dependencies = [
+    "claude-agent-sdk>=0.1.54",
+    "pydantic>=2.12",
+    "pyyaml>=6.0",
+    "rich>=14",
+    "typer>=0.24",
+    "watchdog>=6.0",
+    "xdg-base-dirs>=6.0",
+    "google-genai>=1.57.0",
+    "pillow>=11.0",
+    "numpy>=2.0",
+    "python-dotenv>=1.0",
+    "openai>=1.82",
+]
+packages = [
+    "src/tpet",
+]
+
+[project.license]
+file = "LICENSE"
+
+[project.urls]
+Homepage = "https://github.com/paulrobello/tpet"
+Documentation = "https://github.com/paulrobello/tpet/blob/main/README.md"
+Source = "https://github.com/paulrobello/tpet"
+Issues = "https://github.com/paulrobello/tpet/issues"
+
+[project.scripts]
+tpet = "tpet.cli:app"
+
+[build-system]
+requires = [
+    "hatchling",
+]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.8",
+    "pytest>=9.0.2",
+    "pytest-timeout>=2.4.0",
+    "pytest-cov>=7.0.0",
+    "hatchling>=1.29.0",
+]
+
+[tool.hatch.version]
+path = "src/tpet/__init__.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/tpet",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/tpet",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]
+exclude = [
+    "*.pyc",
+    "__pycache__",
+    "*.so",
+    "*.dylib",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+timeout = 10
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+include = ["src"]

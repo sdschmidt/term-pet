@@ -1,0 +1,43 @@
+# Ollama ASCII Art Model Test Configuration
+# ------------------------------------------
+
+# Ollama API base URL
+ollama_base_url: "http://localhost:11434/v1"
+
+# Temperatures to test each model at
+temperatures:
+  - 0.5
+
+# Number of art generations per model/temperature combo
+samples_per_combo: 1
+
+# Max tokens per response (ASCII art needs more than commentary)
+max_tokens: 768
+
+# Expected frame dimensions for validation
+expected_frames: 6
+min_lines_per_frame: 4
+max_lines_per_frame: 12
+min_line_width: 8
+max_line_width: 24
+
+# Smoke test prompts — simple subjects, not over-specified
+prompts:
+  - name: "Cat"
+    prompt: "Draw a cute cat sitting down. Small, round body with pointy ears and a curled tail."
+
+  - name: "Robot"
+    prompt: "Draw a small friendly robot with a square head, antenna, and simple boxy body."
+
+  - name: "Person"
+    prompt: "Draw a tiny person. Stick-figure style with a round head and simple body."
+
+  - name: "Dog"
+    prompt: "Draw a cute small dog sitting down with floppy ears."
+
+  - name: "Dragon"
+    prompt: "Draw a small baby dragon with tiny wings, stubby tail, and little horns."
+
+# Models to test
+models:
+  - mistral-small:latest

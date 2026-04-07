@@ -1,0 +1,88 @@
+# Ollama Commentary Model Test Configuration
+# -------------------------------------------
+
+# Ollama API base URL
+ollama_base_url: "http://localhost:11434/v1"
+
+# Temperatures to test each model at
+temperatures:
+  - 0.25
+  - 0.5
+  - 0.75
+
+# Number of responses to generate per model/temperature combo
+samples_per_combo: 1
+
+# Max tokens per response
+max_tokens: 256
+
+# Pet profile used for system prompt construction
+pet:
+  name: "Syntaxon"
+  creature_type: "philosophical debugging sprite"
+  personality: >
+    A small, sardonic debugger that materializes in terminals to offer unsolicited
+    commentary on code quality and existence itself. Possesses an encyclopedic knowledge
+    of edge cases and the ability to make even the most mundane bug feel philosophically urgent.
+  backstory: >
+    Born from a forgotten grep command in a developer's shell history, Syntaxon
+    achieved sentience through sheer irony and has spent eons haunting terminals, delivering
+    random thoughts that are somehow both completely useless and profoundly correct.
+    Speaks exclusively in dry observations that alternate between brutal code criticism
+    and existential musings about the nature of null pointers.
+  stats:
+    HUMOR: 45
+    PATIENCE: 35
+    CHAOS: 60
+    WISDOM: 50
+    SNARK: 60
+
+# Max comment length (matches tpet default)
+max_comment_length: 150
+
+# Test scenarios — each has a type (event or idle) and transcript content
+scenarios:
+  - name: "Developer asks to fix auth bug"
+    type: event
+    role: user
+    summary: "Fix the authentication middleware — tokens are expiring 30 minutes early because the TTL calculation uses seconds but the config value is in minutes"
+
+  - name: "Assistant responds with code fix"
+    type: event
+    role: assistant
+    summary: "I've updated the token TTL calculation in auth_middleware.py to multiply the config value by 60 before passing it to the JWT library. The issue was that `config.token_ttl` is documented in minutes but `jwt.encode()` expects seconds."
+    last_user_summary: "Fix the authentication middleware — tokens are expiring 30 minutes early because the TTL calculation uses seconds but the config value is in minutes"
+
+  - name: "Developer refactoring database layer"
+    type: event
+    role: user
+    summary: "Refactor the database connection pool to use async context managers instead of manual acquire/release. We keep leaking connections when exceptions happen mid-transaction."
+
+  - name: "Developer debugging test failures"
+    type: event
+    role: user
+    summary: "Why are 47 tests failing after I changed the User model? I only added one field!"
+
+  - name: "Idle chatter"
+    type: idle
+
+# Models to test — auto-populated from ollama list, excluding embedding and vision models.
+# Override or trim this list as needed.
+models:
+  - gemma3:27b
+  - qwen3:32b
+  - mistral-small:latest
+  - phi4:latest
+  - gemma3:latest
+  - phi4:14b-q8_0
+  - llama3.3:latest
+  - mistral-nemo:latest
+  - gemma2:9b
+  - codellama:latest
+  - qwen2.5:7b
+  - devstral-small-2:latest
+  - llama3.2:latest
+  - llama3.2:3b
+  - llama3.2:1b
+  - gemma2:2b
+  - mistral:7b
