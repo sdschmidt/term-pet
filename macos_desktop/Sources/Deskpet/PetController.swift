@@ -1,6 +1,6 @@
 import AppKit
 
-enum SheepState {
+enum PetState {
     case idle
     case walking
     case sleeping
@@ -10,13 +10,13 @@ enum SheepState {
     case reacting
 }
 
-final class SheepController {
-    private let window: SheepWindow
-    private let view: SheepView
+final class PetController {
+    private let window: PetWindow
+    private let view: PetView
     private let bubble = CommentBubbleWindow()
     private var commentBus: CommentBus?
 
-    private var state: SheepState = .idle
+    private var state: PetState = .idle
     private var facesRight: Bool = true
     private var frameCounter = 0
     private var stateElapsed = 0
@@ -54,8 +54,8 @@ final class SheepController {
         }
         self.frames = loaded
 
-        self.window = SheepWindow(size: Sprites.size)
-        self.view = SheepView(frame: NSRect(origin: .zero, size: Sprites.size))
+        self.window = PetWindow(size: Sprites.size)
+        self.view = PetView(frame: NSRect(origin: .zero, size: Sprites.size))
         window.contentView = view
 
         if let screen = NSScreen.main {
@@ -81,10 +81,7 @@ final class SheepController {
         self.timer = t
         enter(.idle)
 
-        let socketPath = PetConfig.directoryURL
-            .appendingPathComponent("display.sock", isDirectory: false)
-            .path
-        let bus = CommentBus(socketPath: socketPath) { [weak self] event in
+        let bus = CommentBus(socketPath: PetConfig.socketPath) { [weak self] event in
             self?.handleRemote(event)
         }
         bus.start()
@@ -268,7 +265,7 @@ final class SheepController {
         }
     }
 
-    private func enter(_ new: SheepState) {
+    private func enter(_ new: PetState) {
         state = new
         stateElapsed = 0
         switch new {

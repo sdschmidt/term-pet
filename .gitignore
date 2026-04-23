@@ -49,3 +49,8 @@ CLAUDE.local.md
 *~
 *.bak
 scripts/ollama_art_report.html
+
+# macOS desktop pet (Swift build artifacts)
+macos_desktop/.build/
+macos_desktop/.swiftpm/
+macos_desktop/Package.resolved

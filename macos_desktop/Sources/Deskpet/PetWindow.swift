@@ -1,6 +1,6 @@
 import AppKit
 
-final class SheepWindow: NSWindow {
+final class PetWindow: NSWindow {
     init(size: NSSize) {
         super.init(
             contentRect: NSRect(origin: .zero, size: size),

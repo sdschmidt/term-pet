@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Sheep",
+    name: "Deskpet",
     platforms: [.macOS(.v12)],
     targets: [
         .executableTarget(
-            name: "Sheep",
-            path: "Sources/Sheep",
+            name: "Deskpet",
+            path: "Sources/Deskpet",
             resources: [.copy("Resources")]
         )
     ]

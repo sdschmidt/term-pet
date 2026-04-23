@@ -257,6 +257,9 @@ def run_app(
     finally:
         watcher.stop()
         save_profile(pet, profile_path)
+        close_fn = getattr(renderer, "close", None)
+        if callable(close_fn):
+            close_fn()
         _print_session_summary(console, comment_count)
 
 

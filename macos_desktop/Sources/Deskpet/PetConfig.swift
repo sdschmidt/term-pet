@@ -12,6 +12,12 @@ enum PetConfig {
     static let profileURL: URL =
         directoryURL.appendingPathComponent("profile.yaml", isDirectory: false)
 
+    /// Socket path for the CommentBus. Injected from main.swift via `--socket`
+    /// flag; defaults to ~/.config/tpet/display.sock for backwards compat when
+    /// the binary is launched standalone.
+    static var socketPath: String =
+        directoryURL.appendingPathComponent("display.sock", isDirectory: false).path
+
     /// Pet name from term-pet's profile.yaml. Parsed with a minimal YAML-unaware
     /// regex — profile.yaml's `name:` field is always flat scalar. Falls back to
     /// "Pet" if the file can't be read or the field is missing.

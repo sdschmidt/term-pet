@@ -4,18 +4,25 @@ Art mode ``macos-desktop`` takes over from terminal rendering: sprite frames
 live on the user's desktop as a native macOS window, and this renderer pipes
 each tick's state + comment to that window over a local socket.
 
-Relationship with the Swift app:
-  * The Swift app ("Sheep" / deskpet binary) is the socket server, listening at
-    ``~/.config/tpet/display.sock``.
-  * This renderer is a client. On first use it probes for a running server;
-    if none answers, it spawns the Swift binary (from ``$DESKPET_BIN`` or
-    ``which sheep-screenmate``) and polls until it connects.
-  * Wire protocol is newline-delimited JSON per tick:
-        {"state": "idle"|"reacting"|"sleeping", "comment": "..."}
+Lifecycle:
+  * Every ``tpet --art-mode macos-desktop`` invocation spawns its own Swift
+    pet process and communicates with it over a dedicated socket at
+    ``~/.config/tpet/sessions/{tpet_pid}.sock``. Multiple tpet sessions run
+    side-by-side, each with their own pet on the desktop.
+  * The Swift pet is the socket server; this renderer is the client. The
+    binary's ``--socket``, ``--session``, and ``--pwd`` flags tell it which
+    path to listen on and what identity to show in its tray menu.
+  * On tpet exit (normal or Ctrl-C), :meth:`close` sends SIGTERM to the
+    spawned pet and unlinks the socket file. Also registered via ``atexit``
+    for abnormal exits.
+
+Wire protocol (newline-delimited JSON per tick):
+    {"state": "idle"|"reacting"|"sleeping", "comment": "..."}
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
@@ -37,10 +44,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SOCKET_PATH = Path.home() / ".config" / "tpet" / "display.sock"
+SESSIONS_DIR = Path.home() / ".config" / "tpet" / "sessions"
 
 _CONNECT_RETRIES = 20
 _CONNECT_DELAY = 0.2
+_TERMINATE_TIMEOUT = 2.0
 
 
 class DesktopPetUnavailable(RuntimeError):
@@ -48,39 +56,71 @@ class DesktopPetUnavailable(RuntimeError):
 
 
 class MacosDesktopRenderer:
-    """Emits state+comment JSON to the Swift pet; renders a minimal terminal status."""
+    """Emits state+comment JSON to a per-session Swift pet; renders a minimal terminal status."""
 
     def __init__(self, config: TpetConfig) -> None:
         self._config = config
         self._sock: socket.socket | None = None
         self._child: subprocess.Popen[bytes] | None = None
+        self._sock_path: Path = SESSIONS_DIR / f"{os.getpid()}.sock"
         self._last_state: str | None = None
         self._last_comment: str | None = None
-        self._connect_or_spawn()
+
+        # Guarantee cleanup on abnormal exits. close() is idempotent.
+        atexit.register(self.close)
+
+        self._spawn_and_connect()
 
     # ------------------------------------------------------------------
-    # Socket lifecycle
+    # Spawn + connect
     # ------------------------------------------------------------------
 
-    def _connect_or_spawn(self) -> None:
-        if self._try_connect(retries=1):
-            logger.info("connected to existing desktop pet at %s", SOCKET_PATH)
-            return
-        self._spawn()
-        if not self._try_connect(retries=_CONNECT_RETRIES):
+    def _spawn_and_connect(self) -> None:
+        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Unlink any leftover socket from a prior crash at the same PID
+        # (unlikely but cheap).
+        if self._sock_path.exists():
+            self._sock_path.unlink()
+
+        bin_path = self._resolve_binary()
+        if bin_path is None:
             raise DesktopPetUnavailable(
-                f"Could not connect to desktop pet socket {SOCKET_PATH} "
-                f"after spawning the binary. Check that the Swift app is "
-                f"running and writing its socket."
+                "macos-desktop mode needs the Deskpet binary. "
+                "Build it with `make desktop` at the repo root, set "
+                "DESKPET_BIN=/path/to/Deskpet, or install it to PATH as `deskpet`."
             )
-        logger.info("spawned and connected to desktop pet at %s", SOCKET_PATH)
+
+        pwd = str(Path.cwd())
+        session = Path(pwd).name or "deskpet"
+
+        logger.info("spawning desktop pet: %s (session=%s)", bin_path, session)
+        self._child = subprocess.Popen(
+            [
+                bin_path,
+                "--socket", str(self._sock_path),
+                "--session", session,
+                "--pwd", pwd,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        if not self._try_connect(retries=_CONNECT_RETRIES):
+            self._kill_child()
+            raise DesktopPetUnavailable(
+                f"Deskpet spawned but didn't open {self._sock_path} within "
+                f"{_CONNECT_RETRIES * _CONNECT_DELAY:.1f}s."
+            )
+        logger.info("connected to desktop pet at %s", self._sock_path)
 
     def _try_connect(self, *, retries: int) -> bool:
         for _ in range(retries):
-            if SOCKET_PATH.exists():
+            if self._sock_path.exists():
                 try:
                     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    s.connect(str(SOCKET_PATH))
+                    s.connect(str(self._sock_path))
                     self._sock = s
                     return True
                 except OSError:
@@ -88,29 +128,24 @@ class MacosDesktopRenderer:
             time.sleep(_CONNECT_DELAY)
         return False
 
-    def _spawn(self) -> None:
-        bin_path = self._resolve_binary()
-        if bin_path is None:
-            raise DesktopPetUnavailable(
-                "macos-desktop mode needs the Swift pet binary. "
-                "Set DESKPET_BIN=/path/to/Sheep, or install the binary to PATH "
-                "as `sheep-screenmate` (e.g. "
-                "`swift build -c release && cp .build/release/Sheep ~/.local/bin/sheep-screenmate`)."
-            )
-        logger.info("spawning desktop pet: %s", bin_path)
-        self._child = subprocess.Popen(
-            [bin_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-
     @staticmethod
     def _resolve_binary() -> str | None:
+        # 1. Explicit override (dev / CI)
         env = os.environ.get("DESKPET_BIN")
         if env and Path(env).is_file() and os.access(env, os.X_OK):
             return env
-        for name in ("sheep-screenmate", "deskpet"):
+        # 2. Repo-local release build.
+        #    src/tpet/renderer/macos_desktop.py -> repo root is parents[3].
+        repo_root = Path(__file__).resolve().parents[3]
+        for candidate in (
+            repo_root / "macos_desktop" / ".build" / "release" / "Deskpet",
+            repo_root / "macos_desktop" / ".build" / "arm64-apple-macosx" / "release" / "Deskpet",
+            repo_root / "macos_desktop" / ".build" / "x86_64-apple-macosx" / "release" / "Deskpet",
+        ):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        # 3. PATH fallback
+        for name in ("deskpet", "sheep-screenmate"):
             found = shutil.which(name)
             if found:
                 return found
@@ -180,7 +215,7 @@ class MacosDesktopRenderer:
     ) -> None:
         lines: list[Text] = [
             Text(f"{pet.name}", style="bold cyan"),
-            Text(f"art mode: macos-desktop", style="dim"),
+            Text("art mode: macos-desktop", style="dim"),
             Text(f"state:    {state}", style="dim"),
         ]
         if comment:
@@ -189,9 +224,36 @@ class MacosDesktopRenderer:
         body = Text("\n").join(lines)
         live.update(Panel(body, title="tpet", border_style="dim"), refresh=True)
 
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
     def close(self) -> None:
+        """Disconnect, terminate the spawned pet, and unlink the socket file.
+
+        Idempotent — safe to call multiple times (run_app.finally + atexit
+        both invoke it).
+        """
         if self._sock is not None:
             try:
                 self._sock.close()
             finally:
                 self._sock = None
+        self._kill_child()
+        try:
+            self._sock_path.unlink()
+        except (FileNotFoundError, AttributeError):
+            pass
+
+    def _kill_child(self) -> None:
+        if self._child is None:
+            return
+        if self._child.poll() is None:
+            try:
+                self._child.terminate()
+                self._child.wait(timeout=_TERMINATE_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                self._child.kill()
+            except ProcessLookupError:
+                pass
+        self._child = None

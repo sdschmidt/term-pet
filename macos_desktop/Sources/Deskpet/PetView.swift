@@ -1,6 +1,6 @@
 import AppKit
 
-final class SheepView: NSView {
+final class PetView: NSView {
     var image: NSImage? {
         didSet { needsDisplay = true }
     }
