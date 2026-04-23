@@ -38,6 +38,10 @@ def _build_renderer(config: TpetConfig, pet_name: str) -> object:
     1. HalfblockRenderer (ANSI halfblock) if PNG files exist
     2. AsciiRenderer fallback
 
+    For macos-desktop mode, strictly requires all 10 PNG frames (0..9) and
+    errors out early if any are missing — unlike the other modes it does not
+    fall back.
+
     Args:
         config: Application configuration.
         pet_name: Name of the pet (used to check for existing art files).
@@ -46,6 +50,23 @@ def _build_renderer(config: TpetConfig, pet_name: str) -> object:
         A renderer instance implementing the ``Renderer`` protocol.
     """
     from tpet.renderer.protocol import AsciiRenderer, HalfblockRenderer
+
+    if config.art_mode == ArtMode.MACOS_DESKTOP:
+        from tpet.art.storage import missing_macos_desktop_frames
+        from tpet.renderer.macos_desktop import MacosDesktopRenderer
+
+        missing = missing_macos_desktop_frames(config.pet_data_dir, pet_name)
+        if missing:
+            art_dir = config.pet_data_dir / "art"
+            indices = ", ".join(str(i) for i in missing)
+            raise SystemExit(
+                f"macos-desktop art mode requires all 10 sprite frames (0..9) for "
+                f"{pet_name}. Missing frame(s): {indices}. Expected files in "
+                f"{art_dir}/ matching `{pet_name}_frame_<N>.png`. "
+                f"Run `tpet art` to regenerate, or drop the files in manually."
+            )
+        logger.info("macos-desktop renderer selected for %s", pet_name)
+        return MacosDesktopRenderer(config)
 
     if config.art_mode == ArtMode.SIXEL_ART:
         data_dir = config.pet_data_dir

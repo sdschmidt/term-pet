@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image
 
-from tpet.animation.engine import FRAME_COUNT_CURRENT, FRAME_COUNT_LEGACY
+from tpet.animation.engine import FRAME_COUNT_CURRENT, FRAME_COUNT_LEGACY, FRAME_COUNT_MACOS_DESKTOP
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,6 +38,22 @@ _FRAME_POSITIONS_2x2 = [
     (0.5, 0.5, 1.0, 1.0),  # Frame 3: bottom-right (sleep)
 ]
 assert len(_FRAME_POSITIONS_2x2) == FRAME_COUNT_LEGACY  # noqa: S101
+
+# 2x5 layout for macos-desktop mode (10 frames: idle x2, blink x2, excited, sleep,
+# walk x2, fall, stunned). Portrait sheet, 2 cols x 5 rows.
+_FRAME_POSITIONS_2x5 = [
+    (0.0, 0.0, 0.5, 0.2),  # Frame 0: idle A
+    (0.5, 0.0, 1.0, 0.2),  # Frame 1: idle B (shift)
+    (0.0, 0.2, 0.5, 0.4),  # Frame 2: blink A
+    (0.5, 0.2, 1.0, 0.4),  # Frame 3: blink B
+    (0.0, 0.4, 0.5, 0.6),  # Frame 4: excited / surprised
+    (0.5, 0.4, 1.0, 0.6),  # Frame 5: sleeping
+    (0.0, 0.6, 0.5, 0.8),  # Frame 6: walk stride A
+    (0.5, 0.6, 1.0, 0.8),  # Frame 7: walk stride B
+    (0.0, 0.8, 0.5, 1.0),  # Frame 8: falling
+    (0.5, 0.8, 1.0, 1.0),  # Frame 9: stunned
+]
+assert len(_FRAME_POSITIONS_2x5) == FRAME_COUNT_MACOS_DESKTOP  # noqa: S101
 
 
 def _detect_bg_color(image: Image.Image) -> tuple[int, int, int]:
@@ -269,8 +285,16 @@ def split_sprite_sheet(image: Image.Image) -> list[Image.Image]:
     w, h = img.size
     frames: list[Image.Image] = []
 
-    # Auto-detect layout: 2x3 if height >= 1.3x width, otherwise 2x2
-    positions = _FRAME_POSITIONS if h >= w * 1.3 else _FRAME_POSITIONS_2x2
+    # Auto-detect layout by aspect ratio:
+    #   2x5 (10 frames) — very tall, height >= 2.2x width
+    #   2x3 (6 frames)  — tall, height >= 1.3x width
+    #   2x2 (4 frames)  — square-ish
+    if h >= w * 2.2:
+        positions = _FRAME_POSITIONS_2x5
+    elif h >= w * 1.3:
+        positions = _FRAME_POSITIONS
+    else:
+        positions = _FRAME_POSITIONS_2x2
 
     for left_f, top_f, right_f, bottom_f in positions:
         box = (int(left_f * w), int(top_f * h), int(right_f * w), int(bottom_f * h))

@@ -66,6 +66,69 @@ def _sprite_layout_instructions() -> str:
     )
 
 
+def _sprite_layout_instructions_10() -> str:
+    """Return the 10-frame (2 cols x 5 rows) layout instructions for macos-desktop mode.
+
+    This is the 6-frame layout plus four additional frames supporting on-desktop
+    motion: two walk strides, a mid-fall pose, and a stunned-on-back pose.
+    """
+    return (
+        "Layout: 2 columns x 5 rows grid (10 panels). The overall image must be portrait "
+        "orientation (taller than wide, approximately 2:5 aspect ratio). "
+        "Each panel shows a different animation frame:\n"
+        "- Row 1, Left: Idle pose (relaxed, eyes fully open, feet planted)\n"
+        "- Row 1, Right: Idle shift (same pose with tiny body/head tilt, eyes fully open)\n"
+        "- Row 2, Left: BLINK — pixel-for-pixel IDENTICAL to Row 1 Left (same body, same size, "
+        "same position, same colors, same outline) with ONE change: the eyes are closed "
+        "(same closed-eye style as the sleeping frame). Nothing else changes.\n"
+        "- Row 2, Right: BLINK — pixel-for-pixel IDENTICAL to Row 1 Right with eyes closed. "
+        "Nothing else changes.\n"
+        "- Row 3, Left: Excited / surprised — eyes wide open, mouth open in a happy or "
+        "startled expression. Same body and colors as idle.\n"
+        "- Row 3, Right: Sleeping — eyes closed, tiny zzz bubbles above the head. Same body.\n"
+        "- Row 4, Left: Walk stride A — the character is mid-step with its front foot "
+        "planted and the back foot lifted slightly off the ground, body leaning a little "
+        "forward. Facing to the right. Eyes open.\n"
+        "- Row 4, Right: Walk stride B — the opposite stride. Back foot now planted, "
+        "front foot lifted and extended forward. Same facing direction as Row 4 Left. "
+        "Eyes open.\n"
+        "- Row 5, Left: Falling — the character is airborne, body slightly tilted, "
+        "limbs splayed outward in a startled posture. Mouth open in an 'oh no' expression. "
+        "No ground under its feet in this panel.\n"
+        "- Row 5, Right: Stunned — the character has landed and is dazed. Body on or near "
+        "the ground, eyes drawn as two small X shapes, two or three small yellow star "
+        "or asterisk shapes orbiting the head. Mouth slightly open.\n\n"
+        "Style: Clean pixel art, cute and charming, suitable for a desktop pet. "
+        "The creature must look identical across all 10 frames (same proportions, colors, "
+        "style, outline). Only the expression, pose, and small animation details should "
+        "differ between frames.\n\n"
+        "The creature MUST have a thick black outline around the entire body and all major "
+        "features. NO shadows, NO drop shadows, NO ambient occlusion. Flat solid colors "
+        "only with bold black outlines. All 10 panels must use the same scale — the "
+        "character should occupy roughly the same portion of every cell."
+    )
+
+
+def build_sprite_prompt_10(pet: PetProfile, prompt_override: str = "") -> str:
+    """Build the prompt for generating a 2x5 (10-frame) sprite sheet with chroma key background.
+
+    Used when art is being generated for ``art_mode = macos-desktop``. Same
+    background rules as :func:`build_sprite_prompt` (magenta chroma key for
+    Gemini) but with the extended 10-frame layout.
+    """
+    subject = prompt_override.strip() if prompt_override.strip() else _default_subject(pet)
+    return (
+        f"{subject}\n\n"
+        f"{_sprite_layout_instructions_10()}\n\n"
+        "Clean edges, no anti-aliasing into background.\n\n"
+        "CRITICAL: The background MUST be solid pure magenta #FF00FF RGB(255,0,255) "
+        "with absolutely no gradients, no shadows, no shading, no variations. "
+        "A single flat magenta color across the entire background. "
+        "Isolated subject, centered composition within each cell. "
+        "This is essential for automated background removal processing."
+    )
+
+
 def _default_subject(pet: PetProfile) -> str:
     """Return the default subject description from pet profile data.
 
@@ -195,6 +258,41 @@ _EDIT_PROMPTS: dict[int, tuple[str, str]] = {
 }
 
 
+# Edit prompts for the 10-frame macos-desktop layout. Includes the 6-frame
+# entries plus walk-a, walk-b, fall, and stunned. Frames 2 and 3 remain
+# programmatic blink composites (not listed here).
+_EDIT_PROMPTS_10: dict[int, tuple[str, str]] = {
+    **_EDIT_PROMPTS,
+    6: (
+        "walk-a",
+        "Make the character look like it's mid-step walking — front foot planted "
+        "on the ground, back foot lifted slightly off the ground. Body leaning very "
+        "slightly forward. Facing to the right. Eyes stay open. Keep the same "
+        "character, same size, same style, same colors.",
+    ),
+    7: (
+        "walk-b",
+        "Make the character look like it's mid-step in the opposite stride — back "
+        "foot planted, front foot lifted and extended forward. Still facing to the "
+        "right. Eyes stay open. Keep the same character, same size, same style, "
+        "same colors.",
+    ),
+    8: (
+        "fall",
+        "Make the character look like it's falling through the air — limbs splayed "
+        "outward in a startled posture, mouth open in surprise, no ground under "
+        "its feet. Keep the same character, same size, same style, same colors.",
+    ),
+    9: (
+        "stunned",
+        "Make the character look stunned — body on or near the ground, eyes drawn "
+        "as two small X shapes, and two or three small yellow star or asterisk "
+        "shapes floating around its head. Mouth slightly open. Keep the same "
+        "character, same size, same style, same colors.",
+    ),
+}
+
+
 # ---------------------------------------------------------------------------
 # Gemini generators (with chroma key)
 # ---------------------------------------------------------------------------
@@ -258,6 +356,132 @@ def _generate_gemini_sprite_frames(config: TpetConfig, pet: PetProfile) -> tuple
         save_png_frame(config.pet_data_dir, pet.name, i, frame)
 
     return frames, sprite_path
+
+
+def _generate_gemini_sprite_frames_10(
+    config: TpetConfig, pet: PetProfile
+) -> tuple[list[Image.Image], Path]:
+    """Generate and split a 10-frame (2x5) Gemini sprite sheet for macos-desktop mode.
+
+    Uses the extended :func:`build_sprite_prompt_10` prompt and a taller
+    aspect ratio (9:16 — the tallest portrait Gemini supports; 2:5 is not
+    supported by the API). Splits via ``split_sprite_sheet`` which
+    auto-detects the 2x5 layout by aspect ratio.
+    """
+    from tpet.art.client import GeminiImageClient
+    from tpet.art.process import create_blink_frame, split_sprite_sheet
+
+    art_dir = get_art_dir(config.pet_data_dir)
+    sprite_path = art_dir / f"{_sanitize_name(pet.name)}_sprite.png"
+
+    resolved = config.resolved_image_art_provider
+    client = GeminiImageClient(model=resolved.model, api_key=resolved.api_key)
+    prompt = build_sprite_prompt_10(pet, prompt_override=config.art_prompt)
+    save_prompt(config.pet_data_dir, pet.name, prompt)
+    client.generate_sprite(
+        prompt=prompt,
+        output_path=sprite_path,
+        aspect_ratio="9:16",
+        resolution="1k",
+    )
+
+    sprite = Image.open(sprite_path)
+    logger.debug("Sprite sheet loaded (10-frame): %dx%d", sprite.width, sprite.height)
+
+    frames = split_sprite_sheet(sprite)
+    logger.debug("Split into %d frames", len(frames))
+    if len(frames) != 10:
+        raise RuntimeError(
+            f"Expected 10-frame sprite sheet for macos-desktop, got {len(frames)} frames. "
+            f"Sprite was {sprite.width}x{sprite.height}; aspect too flat — "
+            f"Gemini may have ignored the 9:16 request."
+        )
+
+    # Same blink-replacement trick as the 6-frame pipeline: keep closed-eye
+    # frames pixel-consistent with the open-eye ones by compositing from sleep.
+    sleep_frame = frames[5]
+    frames[2] = create_blink_frame(frames[0], sleep_frame)
+    frames[3] = create_blink_frame(frames[1], sleep_frame)
+    logger.info("Replaced blink frames 2,3 with programmatic composites from idle+sleep")
+
+    for i, frame in enumerate(frames):
+        save_png_frame(config.pet_data_dir, pet.name, i, frame)
+
+    return frames, sprite_path
+
+
+def generate_macos_desktop_art_openai(
+    config: TpetConfig,
+    pet: PetProfile,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    base_image_path: Path | None = None,
+) -> tuple[list[str], GenerationResult | None]:
+    """Generate the 10 PNG frames for macos-desktop via OpenAI/OpenRouter.
+
+    Uses the parameterized OpenAI pipeline with :data:`_EDIT_PROMPTS_10`
+    (adds walk-a, walk-b, fall, stunned to the existing idle-shift/react/sleep
+    edits). Frames 2 and 3 remain programmatic blink composites.
+
+    Saves each frame as ``{pet_name}_frame_{N}.png`` via save_png_frame — the
+    OpenAI path already writes to those paths during the edit loop, but we
+    save again to be consistent with the Gemini path.
+    """
+    try:
+        frames, result = _generate_openai_frames(
+            config,
+            pet,
+            on_progress=on_progress,
+            base_image_path=base_image_path,
+            edit_prompts=_EDIT_PROMPTS_10,
+            frame_count=10,
+        )
+    except (RuntimeError, OSError):
+        logger.exception("OpenAI macos-desktop generation failed")
+        return [], None
+
+    # Frames are already on disk (the edit loop writes each one). Re-save to
+    # be explicit, matching the Gemini path's behavior.
+    for i, frame in enumerate(frames):
+        save_png_frame(config.pet_data_dir, pet.name, i, frame)
+
+    return [], result
+
+
+def generate_macos_desktop_art(
+    config: TpetConfig,
+    pet: PetProfile,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    base_image_path: Path | None = None,
+) -> tuple[list[str], GenerationResult | None]:
+    """Generate the 10 PNG frames required by art_mode=macos-desktop.
+
+    Routes to the Gemini sprite-sheet pipeline or the OpenAI edit pipeline
+    based on the configured image art provider. Returns empty art-strings —
+    the desktop pet consumes raw PNGs, not half-block text.
+    """
+    from tpet.art.openai_client import GenerationResult  # noqa: F401  # re-exported for type
+    from tpet.config import LLMProvider
+
+    resolved = config.resolved_image_art_provider
+
+    if resolved.provider == LLMProvider.GEMINI:
+        if base_image_path is not None:
+            raise ValueError(
+                "--base-image is not supported for macos-desktop with Gemini. "
+                "Use OpenAI/OpenRouter provider if you need to supply your own idle frame."
+            )
+        _generate_gemini_sprite_frames_10(config, pet)
+        return [], None
+
+    if resolved.provider in (LLMProvider.OPENAI, LLMProvider.OPENROUTER):
+        return generate_macos_desktop_art_openai(
+            config, pet, on_progress=on_progress, base_image_path=base_image_path
+        )
+
+    raise ValueError(
+        f"macos-desktop art generation is not supported for provider "
+        f"{resolved.provider.value}. Use 'gemini', 'openai', or 'openrouter'."
+    )
 
 
 def _process_frames(
@@ -347,26 +571,34 @@ def _generate_openai_frames(
     pet: PetProfile,
     on_progress: Callable[[int, int, str], None] | None = None,
     base_image_path: Path | None = None,
+    *,
+    edit_prompts: dict[int, tuple[str, str]] = _EDIT_PROMPTS,
+    frame_count: int = 6,
 ) -> tuple[list[Image.Image], GenerationResult]:
-    """Generate 6 individual frames via OpenAI: 1 base generate + 3 edits + 2 programmatic blink.
+    """Generate individual frames via OpenAI: base generate + edits + programmatic blinks.
 
     Uses images.generate for the base idle frame, then images.edit with
-    input_fidelity="high" for expression variants (idle-shift, react, sleep).
-    Blink frames (2, 3) are created programmatically by compositing closed-eye
-    pixels from the sleep frame onto the idle frames, since the edit API
-    introduces too much variation for minimal eye-only changes.
+    input_fidelity="high" for each variant in ``edit_prompts``. Blink frames
+    (2, 3) are always created programmatically by compositing closed-eye pixels
+    from the sleep frame onto the idle frames.
 
     When ``base_image_path`` is provided, it is used as the idle frame directly,
     skipping generation and cleanup steps.
+
+    Defaults (``edit_prompts=_EDIT_PROMPTS``, ``frame_count=6``) produce the
+    canonical 6-frame sprite. Pass ``edit_prompts=_EDIT_PROMPTS_10`` and
+    ``frame_count=10`` for the macos-desktop layout.
 
     Args:
         config: Application configuration.
         pet: Pet profile.
         on_progress: Optional callback(current, total, label) for progress updates.
         base_image_path: Optional path to a user-provided idle frame image.
+        edit_prompts: Mapping of target frame index -> (label, edit prompt).
+        frame_count: Number of frames to assemble in the returned list.
 
     Returns:
-        Tuple of (list of 6 PIL Images in order, GenerationResult with usage stats).
+        Tuple of (list of PIL Images in order, GenerationResult with usage stats).
 
     Raises:
         RuntimeError: If any API call fails.
@@ -386,7 +618,7 @@ def _generate_openai_frames(
     if base_image_path is not None:
         # Use the user-provided image as frame 0 — skip generation and cleanup
         # +len for variant edits, +1 for blink compositing
-        total_steps = len(_EDIT_PROMPTS) + 1
+        total_steps = len(edit_prompts) + 1
 
         def _report(current: int, label: str) -> None:
             if on_progress:
@@ -401,7 +633,7 @@ def _generate_openai_frames(
         ai_frames: dict[int, Image.Image] = {0: user_image}
     else:
         # +1 for generate, +1 for cleanup edit, +len for variant edits, +1 for blink compositing
-        total_steps = 2 + len(_EDIT_PROMPTS) + 1
+        total_steps = 2 + len(edit_prompts) + 1
 
         def _report(current: int, label: str) -> None:
             if on_progress:
@@ -445,11 +677,12 @@ def _generate_openai_frames(
     edit_source = frame_0_path
     logger.debug("Base frame 0 (idle): %dx%d", ai_frames[0].width, ai_frames[0].height)
 
-    # Edit the base frame for each variant (1=idle-shift, 4=react, 5=sleep)
-    # Step numbering starts after the base image steps (1 if user-provided, 3 if generated)
+    # Edit the base frame for each variant. For 6-frame: 1=idle-shift, 4=react,
+    # 5=sleep. For 10-frame: plus 6=walk-a, 7=walk-b, 8=fall, 9=stunned.
+    # Step numbering starts after the base image steps (1 if user-provided, 3 if generated).
     edit_step_start = 1 if base_image_path is not None else 3
-    for step, frame_idx in enumerate(sorted(_EDIT_PROMPTS.keys()), start=edit_step_start):
-        label, edit_prompt = _EDIT_PROMPTS[frame_idx]
+    for step, frame_idx in enumerate(sorted(edit_prompts.keys()), start=edit_step_start):
+        label, edit_prompt = edit_prompts[frame_idx]
         _report(step, label)
         out_path = art_dir / f"{safe_name}_frame_{frame_idx}.png"
         logger.info("Generating frame %d (%s) via OpenAI edit", frame_idx, label)
@@ -483,8 +716,8 @@ def _generate_openai_frames(
     ai_frames[3] = blink_1
     logger.info("Created blink frame 3 via compositing from idle-shift + sleep")
 
-    # Assemble in order: 0, 1, 2, 3, 4, 5
-    frames = [ai_frames[i] for i in range(6)]
+    # Assemble in order: 0, 1, 2, 3, ..., frame_count - 1
+    frames = [ai_frames[i] for i in range(frame_count)]
 
     result.usage = total_usage
     result.frame_count = len(frames)
@@ -604,5 +837,11 @@ def generate_art(
                 base_image_path=base_image_path,
             )
         return generate_halfblock_art(config, pet), None
-    else:
-        raise ValueError(f"Cannot generate graphical art for mode: {config.art_mode}")
+    if config.art_mode == ArtMode.MACOS_DESKTOP:
+        return generate_macos_desktop_art(
+            config,
+            pet,
+            on_progress=on_progress,
+            base_image_path=base_image_path,
+        )
+    raise ValueError(f"Cannot generate graphical art for mode: {config.art_mode}")

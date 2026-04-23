@@ -188,6 +188,7 @@ class ArtMode(StrEnum):
 
     ASCII = "ascii"
     SIXEL_ART = "sixel-art"
+    MACOS_DESKTOP = "macos-desktop"
 
 
 class BubblePlacement(StrEnum):
