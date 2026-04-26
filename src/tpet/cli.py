@@ -371,6 +371,13 @@ def cmd_art(
             help="Path to a custom image to use as the idle frame instead of generating one (forces OpenAI edits)",
         ),
     ] = None,
+    recrop: Annotated[
+        bool,
+        typer.Option(
+            "--recrop",
+            help="Re-crop existing PNG frames to a shared bounding box; skip generation",
+        ),
+    ] = False,
     debug: Annotated[bool, typer.Option("--debug", "-D", help="Enable debug logging")] = False,
     verbose: Annotated[int, typer.Option("--verbose", "-v", count=True, help="Increase verbosity")] = 0,
 ) -> None:
@@ -402,6 +409,25 @@ def cmd_art(
     if pet is None:
         console.print("[yellow]No pet found. Run `tpet new` to create one.[/yellow]")
         raise typer.Exit(code=1)
+
+    if recrop:
+        from PIL import Image
+
+        from tpet.art.process import crop_frames_to_common_bbox
+        from tpet.art.storage import get_art_dir, sanitize_name
+
+        art_dir = get_art_dir(config.pet_data_dir)
+        safe = sanitize_name(pet.name)
+        paths = sorted(p for p in art_dir.glob(f"{safe}_frame_*.png") if "_raw" not in p.name)
+        if not paths:
+            console.print(f"[yellow]No frame PNGs found for {pet.name} in {art_dir}.[/yellow]")
+            raise typer.Exit(code=1)
+        images = [Image.open(p).convert("RGBA") for p in paths]
+        cropped = crop_frames_to_common_bbox(images)
+        for p, img in zip(paths, cropped, strict=True):
+            img.save(p, format="PNG")
+        console.print(f"[green]Re-cropped {len(cropped)} frames for {pet.name} to {cropped[0].size}.[/green]")
+        return
 
     mode_label = config.art_mode.replace("-", " ").title()
     if base_image:
