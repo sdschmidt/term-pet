@@ -361,7 +361,7 @@ def _generate_gemini_sprite_frames(config: TpetConfig, pet: PetProfile) -> tuple
         OSError: If the sprite file cannot be read.
     """
     from tpet.art.client import GeminiImageClient
-    from tpet.art.process import create_blink_frame, split_sprite_sheet
+    from tpet.art.process import create_blink_frame, crop_frames_to_common_bbox, split_sprite_sheet
 
     art_dir = get_art_dir(config.pet_data_dir)
     sprite_path = art_dir / f"{_sanitize_name(pet.name)}_sprite.png"
@@ -391,6 +391,13 @@ def _generate_gemini_sprite_frames(config: TpetConfig, pet: PetProfile) -> tuple
         frames[3] = create_blink_frame(frames[1], sleep_frame)
         logger.info("Replaced blink frames 2,3 with programmatic composites from idle+sleep")
 
+    # Crop all frames to a shared union bbox so every frame has identical
+    # dimensions — keeps the character position stable across frames and
+    # strips the empty margins the LLM leaves around the subject.
+    frames = crop_frames_to_common_bbox(frames)
+    if frames:
+        logger.debug("Union-cropped frames to %dx%d", frames[0].width, frames[0].height)
+
     # Save raw PNG frames at full resolution for runtime scaling
     for i, frame in enumerate(frames):
         save_png_frame(config.pet_data_dir, pet.name, i, frame)
@@ -407,7 +414,7 @@ def _generate_gemini_sprite_frames_10(config: TpetConfig, pet: PetProfile) -> tu
     auto-detects the 2x5 layout by aspect ratio.
     """
     from tpet.art.client import GeminiImageClient
-    from tpet.art.process import create_blink_frame, split_sprite_sheet
+    from tpet.art.process import create_blink_frame, crop_frames_to_common_bbox, split_sprite_sheet
 
     art_dir = get_art_dir(config.pet_data_dir)
     sprite_path = art_dir / f"{_sanitize_name(pet.name)}_sprite.png"
@@ -441,6 +448,12 @@ def _generate_gemini_sprite_frames_10(config: TpetConfig, pet: PetProfile) -> tu
     frames[2] = create_blink_frame(frames[0], sleep_frame)
     frames[3] = create_blink_frame(frames[1], sleep_frame)
     logger.info("Replaced blink frames 2,3 with programmatic composites from idle+sleep")
+
+    # Crop all frames to a shared union bbox so every frame has identical
+    # dimensions — keeps the character position stable across frames and
+    # strips the empty margins the LLM leaves around the subject.
+    frames = crop_frames_to_common_bbox(frames)
+    logger.debug("Union-cropped 10 frames to %dx%d", frames[0].width, frames[0].height)
 
     for i, frame in enumerate(frames):
         save_png_frame(config.pet_data_dir, pet.name, i, frame)
@@ -770,6 +783,19 @@ def _generate_openai_frames(
 
     # Assemble in order: 0, 1, 2, 3, ..., frame_count - 1
     frames = [ai_frames[i] for i in range(frame_count)]
+
+    # Crop all frames to a shared union bbox so every frame has identical
+    # dimensions — keeps the character position stable across frames and
+    # strips the empty margins the edit API leaves around the subject.
+    # Rewrite the on-disk PNGs with the cropped versions so downstream
+    # consumers (macos-desktop Swift, halfblock renderer) see consistent art.
+    from tpet.art.process import crop_frames_to_common_bbox
+
+    frames = crop_frames_to_common_bbox(frames)
+    logger.debug("Union-cropped %d frames to %dx%d", len(frames), frames[0].width, frames[0].height)
+    for i, frame in enumerate(frames):
+        out_path = art_dir / f"{safe_name}_frame_{i}.png"
+        frame.save(out_path, format="PNG")
 
     result.usage = total_usage
     result.frame_count = len(frames)

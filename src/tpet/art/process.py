@@ -438,6 +438,62 @@ def _autocrop(image: Image.Image, padding: int = 2) -> Image.Image:
     return image.crop((left, top, right, bottom))
 
 
+def crop_frames_to_common_bbox(
+    frames: list[Image.Image],
+    padding: int = 2,
+) -> list[Image.Image]:
+    """Crop a list of frames to a single shared bounding box.
+
+    For each frame, compute the opaque bbox (alpha > 32); take the union
+    across all frames (min-left, min-top, max-right, max-bottom); crop
+    every frame to that shared box. All returned frames have identical
+    dimensions, preserving per-frame character position.
+
+    Args:
+        frames: List of RGBA PIL images (typically all the same source size).
+        padding: Extra pixels to keep around the union bbox.
+
+    Returns:
+        List of cropped frames, all with identical dimensions. Returns the
+        input unchanged if no frame contains any opaque pixel.
+    """
+    if not frames:
+        return frames
+
+    lefts: list[int] = []
+    tops: list[int] = []
+    rights: list[int] = []
+    bottoms: list[int] = []
+    canvas_w = 0
+    canvas_h = 0
+
+    for frame in frames:
+        rgba = frame.convert("RGBA")
+        arr = np.array(rgba)
+        h, w = arr.shape[:2]
+        canvas_w = max(canvas_w, w)
+        canvas_h = max(canvas_h, h)
+        opaque = arr[:, :, 3] > 32
+        if not opaque.any():
+            continue
+        rows = np.where(opaque.any(axis=1))[0]
+        cols = np.where(opaque.any(axis=0))[0]
+        tops.append(int(rows[0]))
+        bottoms.append(int(rows[-1]) + 1)
+        lefts.append(int(cols[0]))
+        rights.append(int(cols[-1]) + 1)
+
+    if not lefts:
+        return frames
+
+    left = max(0, min(lefts) - padding)
+    top = max(0, min(tops) - padding)
+    right = min(canvas_w, max(rights) + padding)
+    bottom = min(canvas_h, max(bottoms) + padding)
+
+    return [frame.convert("RGBA").crop((left, top, right, bottom)) for frame in frames]
+
+
 def render_halfblock_from_png(
     png_path: Path,
     max_terminal_rows: int,
@@ -447,7 +503,9 @@ def render_halfblock_from_png(
 
     Shared runtime utility used by the display layer to scale art to fit
     alongside the speech bubble without exceeding the available space.
-    Auto-crops transparent padding around the character before scaling.
+    PNGs on disk are pre-cropped to the shared union bbox at generation
+    time, so no per-frame autocrop is applied here (that would break the
+    consistent positioning across frames).
 
     Args:
         png_path: Path to the raw PNG frame (full resolution).
@@ -458,9 +516,6 @@ def render_halfblock_from_png(
         Half-block ANSI string sized to fit within the given constraints.
     """
     image = Image.open(png_path).convert("RGBA")
-
-    # Crop to character bounding box to eliminate transparent padding
-    image = _autocrop(image)
 
     # Each terminal row = 2 pixel rows
     target_pixel_h = max(4, max_terminal_rows * 2)
