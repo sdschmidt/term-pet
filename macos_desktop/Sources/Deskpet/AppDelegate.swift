@@ -27,23 +27,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        // Pet name (bold header)
-        let header = NSMenuItem()
-        header.attributedTitle = NSAttributedString(
-            string: PetConfig.petName,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .bold),
-                .foregroundColor: NSColor.labelColor,
-            ]
-        )
-        header.isEnabled = false
-        menu.addItem(header)
-
+        menu.addItem(headerItem())
         menu.addItem(infoItem(key: "session", value: context.session))
         menu.addItem(infoItem(key: "cwd", value: collapseHome(context.pwd)))
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(spriteItem())
+
+        if !PetConfig.stats.isEmpty {
+            menu.addItem(NSMenuItem.separator())
+            menu.addItem(sectionHeader("Stats"))
+            menu.addItem(statsItem())
+        }
 
         if !PetConfig.personality.isEmpty {
             menu.addItem(NSMenuItem.separator())
@@ -93,6 +88,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    /// Bold pet name colored by rarity, followed by rarity stars and label.
+    /// Example: "Fleeceworth  ★  COMMON".
+    private func headerItem() -> NSMenuItem {
+        let rarity = PetConfig.rarity
+        let name = NSAttributedString(
+            string: PetConfig.petName,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .bold),
+                .foregroundColor: rarity.color,
+            ]
+        )
+        let suffix = NSAttributedString(
+            string: "  \(rarity.stars)  \(rarity.rawValue)",
+            attributes: [
+                .font: NSFont.systemFont(
+                    ofSize: NSFont.smallSystemFontSize,
+                    weight: .regular
+                ),
+                .foregroundColor: rarity.color,
+            ]
+        )
+        let combined = NSMutableAttributedString()
+        combined.append(name)
+        combined.append(suffix)
+
+        let item = NSMenuItem()
+        item.attributedTitle = combined
+        item.isEnabled = false
+        return item
+    }
+
     /// Disabled "key:  value" info row. Monospaced so fields align.
     private func infoItem(key: String, value: String) -> NSMenuItem {
         let padded = key.padding(toLength: 8, withPad: " ", startingAt: 0)
@@ -127,6 +153,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ]
         )
         item.isEnabled = false
+        return item
+    }
+
+    /// Stat table: one row per stat, with a 10-cell bar colored by rarity.
+    /// Uses a monospace font so all rows align across variable-length names.
+    /// Example row: "HUMOR      ██████░░░░  60".
+    private func statsItem(maxWidth: CGFloat = 280) -> NSMenuItem {
+        let insetLeft: CGFloat = 20
+        let insetRight: CGFloat = 12
+        let insetTop: CGFloat = 2
+        let insetBottom: CGFloat = 6
+        let textWidth = maxWidth - insetLeft - insetRight
+
+        let font = NSFont.monospacedSystemFont(
+            ofSize: NSFont.smallSystemFontSize,
+            weight: .regular
+        )
+        let filledColor = PetConfig.rarity.color
+        let emptyColor = NSColor.tertiaryLabelColor
+        let labelColor = NSColor.secondaryLabelColor
+
+        let stats = PetConfig.stats
+        let nameWidth = (stats.map { $0.name.count }.max() ?? 0) + 2
+
+        let out = NSMutableAttributedString()
+        for (idx, stat) in stats.enumerated() {
+            if idx > 0 {
+                out.append(NSAttributedString(string: "\n"))
+            }
+            let clamped = max(0, min(100, stat.value))
+            let filled = Int((Double(clamped) / 100.0 * 10.0).rounded())
+            let empty = 10 - filled
+            let paddedName = stat.name.padding(
+                toLength: nameWidth, withPad: " ", startingAt: 0
+            )
+            out.append(NSAttributedString(
+                string: paddedName,
+                attributes: [.font: font, .foregroundColor: labelColor]
+            ))
+            out.append(NSAttributedString(
+                string: String(repeating: "\u{2588}", count: filled),
+                attributes: [.font: font, .foregroundColor: filledColor]
+            ))
+            out.append(NSAttributedString(
+                string: String(repeating: "\u{2591}", count: empty),
+                attributes: [.font: font, .foregroundColor: emptyColor]
+            ))
+            out.append(NSAttributedString(
+                string: String(format: "  %3d", clamped),
+                attributes: [.font: font, .foregroundColor: labelColor]
+            ))
+        }
+
+        let field = NSTextField(labelWithAttributedString: out)
+        field.maximumNumberOfLines = 0
+        field.lineBreakMode = .byClipping
+        field.isSelectable = false
+        field.drawsBackground = false
+        field.isBordered = false
+        let fitted = field.sizeThatFits(
+            NSSize(width: textWidth, height: .greatestFiniteMagnitude)
+        )
+        field.frame = NSRect(x: insetLeft, y: insetBottom,
+                             width: textWidth, height: fitted.height)
+
+        let container = NSView(
+            frame: NSRect(x: 0, y: 0, width: maxWidth,
+                          height: fitted.height + insetTop + insetBottom)
+        )
+        container.addSubview(field)
+
+        let item = NSMenuItem()
+        item.view = container
         return item
     }
 

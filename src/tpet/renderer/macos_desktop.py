@@ -7,11 +7,13 @@ each tick's state + comment to that window over a local socket.
 Lifecycle:
   * Every ``tpet --art-mode macos-desktop`` invocation spawns its own Swift
     pet process and communicates with it over a dedicated socket at
-    ``~/.config/tpet/sessions/{tpet_pid}.sock``. Multiple tpet sessions run
+    ``{config_dir}/sessions/{tpet_pid}.sock``. Multiple tpet sessions run
     side-by-side, each with their own pet on the desktop.
-  * The Swift pet is the socket server; this renderer is the client. The
-    binary's ``--socket``, ``--session``, and ``--pwd`` flags tell it which
-    path to listen on and what identity to show in its tray menu.
+  * The Swift pet is the socket server; this renderer is the client. We
+    pass ``--socket``, ``--session``, ``--pwd``, ``--art-dir``, and
+    ``--profile`` so the binary knows where to listen, what identity to
+    show in its tray, and which sprite/profile files to read — critical
+    when the user launches tpet with ``--config-dir`` pointing elsewhere.
   * On tpet exit (normal or Ctrl-C), :meth:`close` sends SIGTERM to the
     spawned pet and unlinks the socket file. Also registered via ``atexit``
     for abnormal exits.
@@ -44,8 +46,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SESSIONS_DIR = Path.home() / ".config" / "tpet" / "sessions"
-
 _CONNECT_RETRIES = 20
 _CONNECT_DELAY = 0.2
 _TERMINATE_TIMEOUT = 2.0
@@ -62,7 +62,11 @@ class MacosDesktopRenderer:
         self._config = config
         self._sock: socket.socket | None = None
         self._child: subprocess.Popen[bytes] | None = None
-        self._sock_path: Path = SESSIONS_DIR / f"{os.getpid()}.sock"
+        # Keep per-session sockets and the art/profile under the same
+        # config_dir the user passed on the command line, so `tpet
+        # --config-dir ~/.config/tpet-alt/` doesn't fall back to the default.
+        self._sessions_dir: Path = config.config_dir / "sessions"
+        self._sock_path: Path = self._sessions_dir / f"{os.getpid()}.sock"
         self._last_state: str | None = None
         self._last_comment: str | None = None
 
@@ -76,7 +80,7 @@ class MacosDesktopRenderer:
     # ------------------------------------------------------------------
 
     def _spawn_and_connect(self) -> None:
-        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        self._sessions_dir.mkdir(parents=True, exist_ok=True)
 
         # Unlink any leftover socket from a prior crash at the same PID
         # (unlikely but cheap).
@@ -101,6 +105,8 @@ class MacosDesktopRenderer:
                 "--socket", str(self._sock_path),
                 "--session", session,
                 "--pwd", pwd,
+                "--art-dir", str(self._config.art_dir),
+                "--profile", str(self._config.profile_path),
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
