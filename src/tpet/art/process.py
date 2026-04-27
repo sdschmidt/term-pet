@@ -56,7 +56,11 @@ _FRAME_POSITIONS_2x5 = [
 assert len(_FRAME_POSITIONS_2x5) == FRAME_COUNT_MACOS_DESKTOP  # noqa: S101
 
 
-def _detect_bg_color(image: Image.Image) -> tuple[int, int, int]:
+def _detect_bg_color(
+    image: Image.Image,
+    target_color: tuple[int, int, int] | None = None,
+    target_radius: int = 120,
+) -> tuple[int, int, int]:
     """Detect the background color by sampling the image border.
 
     Finds the most common color cluster in a 2px border strip.
@@ -64,6 +68,13 @@ def _detect_bg_color(image: Image.Image) -> tuple[int, int, int]:
 
     Args:
         image: Input PIL Image.
+        target_color: If provided, bias detection toward border pixels close
+            to this color (within ``target_radius``) and average them. Useful
+            when the prompt requested a known chroma color but the model
+            produced a slightly off variant. Falls back to dominant-cluster
+            detection if no border pixels are close to the target.
+        target_radius: Max Euclidean distance from ``target_color`` for a
+            border pixel to count as a target match.
 
     Returns:
         Detected RGB background color.
@@ -83,6 +94,16 @@ def _detect_bg_color(image: Image.Image) -> tuple[int, int, int]:
         ]
     )
 
+    if target_color is not None:
+        target = np.array(target_color, dtype=np.float64)
+        dists = np.sqrt(np.sum((border_pixels.astype(np.float64) - target) ** 2, axis=1))
+        close_mask = dists <= target_radius
+        # Require at least 1% of border pixels to match — otherwise the target
+        # is wrong (e.g. wrong prompt) and we should fall through.
+        if close_mask.sum() >= max(10, int(border_pixels.shape[0] * 0.01)):
+            avg = border_pixels[close_mask].astype(np.float64).mean(axis=0)
+            return (int(avg[0]), int(avg[1]), int(avg[2]))
+
     # Quantize to 16-step bins and find the dominant cluster
     quantized = (border_pixels.astype(np.int32) // 16 * 16).astype(np.uint8)
     tuples = [tuple(p) for p in quantized]
@@ -99,6 +120,7 @@ def remove_chroma_key(
     image: Image.Image,
     bg_color: tuple[int, int, int] | None = None,
     tolerance: int = 80,
+    target_color: tuple[int, int, int] | None = None,
 ) -> Image.Image:
     """Remove background using flood-fill from image edges.
 
@@ -109,13 +131,18 @@ def remove_chroma_key(
 
     Args:
         image: Input PIL Image (any mode, converted to RGBA).
-        bg_color: RGB color to remove, or None to auto-detect from border.
+        bg_color: RGB color to remove. When None, detect from the image
+            border (optionally biased by ``target_color``).
         tolerance: Maximum Euclidean color distance for background removal.
+        target_color: Hint passed to the auto-detector — biases detection
+            toward border pixels close to this color (e.g. ``(255, 0, 255)``
+            for the magenta chroma key Gemini is asked to produce). Avoids
+            picking up the character's outline when it touches a cell edge.
 
     Returns:
         RGBA image with background pixels set to transparent.
     """
-    detected_bg = bg_color or _detect_bg_color(image)
+    detected_bg = bg_color or _detect_bg_color(image, target_color=target_color)
     logger.debug("Chroma key bg_color=%s (detected=%s)", detected_bg, bg_color is None)
 
     img = image.convert("RGBA")
@@ -267,17 +294,29 @@ def create_blink_frame(
     return Image.fromarray(result, mode="RGBA")
 
 
-def split_sprite_sheet(image: Image.Image) -> list[Image.Image]:
+def split_sprite_sheet(
+    image: Image.Image,
+    layout: str | None = None,
+    inset_px: int = 0,
+) -> list[Image.Image]:
     """Split a sprite sheet into individual frames.
 
-    Auto-detects 2x3 (6-frame) or 2x2 (4-frame) layout based on aspect ratio.
-    A 2x3 sheet is taller than wide (aspect < 0.8), while 2x2 is square-ish.
+    Auto-detects 2x3 (6-frame) or 2x2 (4-frame) layout based on aspect ratio,
+    or uses an explicit ``layout`` override.
 
     Args:
         image: Input sprite sheet image.
+        layout: Optional explicit layout (``"2x5"``, ``"2x3"``, ``"2x2"``).
+            When set, skips aspect-ratio detection. Required for 2x5 sheets
+            generated at 9:16 (Gemini's tallest portrait), since their aspect
+            ratio is not extreme enough to be auto-detected.
+        inset_px: Pixels to shrink each cell on every side. Used to skip
+            thin grid/border lines the model occasionally draws between
+            cells. The shrink is symmetric per side, so character placement
+            remains consistent across frames.
 
     Returns:
-        List of PIL Images. 6 frames for 2x3, 4 frames for 2x2.
+        List of PIL Images. 10 frames for 2x5, 6 frames for 2x3, 4 frames for 2x2.
         Frame order for 2x3: idle, idle-shift, blink, blink-shift, react, sleep.
         Frame order for 2x2: idle, idle-shift, react, sleep.
     """
@@ -285,11 +324,13 @@ def split_sprite_sheet(image: Image.Image) -> list[Image.Image]:
     w, h = img.size
     frames: list[Image.Image] = []
 
-    # Auto-detect layout by aspect ratio:
-    #   2x5 (10 frames) — very tall, height >= 2.2x width
-    #   2x3 (6 frames)  — tall, height >= 1.3x width
-    #   2x2 (4 frames)  — square-ish
-    if h >= w * 2.2:
+    if layout == "2x5":
+        positions = _FRAME_POSITIONS_2x5
+    elif layout == "2x3":
+        positions = _FRAME_POSITIONS
+    elif layout == "2x2":
+        positions = _FRAME_POSITIONS_2x2
+    elif h >= w * 2.2:
         positions = _FRAME_POSITIONS_2x5
     elif h >= w * 1.3:
         positions = _FRAME_POSITIONS
@@ -297,8 +338,11 @@ def split_sprite_sheet(image: Image.Image) -> list[Image.Image]:
         positions = _FRAME_POSITIONS_2x2
 
     for left_f, top_f, right_f, bottom_f in positions:
-        box = (int(left_f * w), int(top_f * h), int(right_f * w), int(bottom_f * h))
-        frames.append(img.crop(box))
+        left = int(left_f * w) + inset_px
+        top = int(top_f * h) + inset_px
+        right = int(right_f * w) - inset_px
+        bottom = int(bottom_f * h) - inset_px
+        frames.append(img.crop((left, top, right, bottom)))
 
     return frames
 
